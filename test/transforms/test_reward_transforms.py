@@ -308,6 +308,39 @@ class TestRewardClipping(TransformBase):
         assert (td["reward"] <= 0.1).all()
         assert (td["reward"] >= -0.1).all()
 
+    @pytest.mark.parametrize(
+        "clamp_min,clamp_max,expected",
+        [
+            (None, 0.5, [-2.0, 0.0, 0.5]),
+            (-0.5, None, [-0.5, 0.0, 3.0]),
+        ],
+    )
+    def test_single_bound(self, clamp_min, clamp_max, expected):
+        t = RewardClipping(clamp_min=clamp_min, clamp_max=clamp_max)
+        td = TensorDict({"reward": torch.tensor([-2.0, 0.0, 3.0])}, [])
+        t._call(td)
+        torch.testing.assert_close(td["reward"], torch.tensor(expected))
+        repr(t)
+
+        env = TransformedEnv(
+            ContinuousActionVecMockEnv(),
+            RewardClipping(clamp_min=clamp_min, clamp_max=clamp_max),
+        )
+        check_env_specs(env)
+        space = env.reward_spec.space
+        if clamp_min is None:
+            assert (space.low < -1e30).all()
+        else:
+            assert (space.low == clamp_min).all()
+        if clamp_max is None:
+            assert (space.high > 1e30).all()
+        else:
+            assert (space.high == clamp_max).all()
+
+    def test_no_bound_error(self):
+        with pytest.raises(TypeError, match="clamp_min or clamp_max"):
+            RewardClipping()
+
     def test_transform_inverse(self):
         raise pytest.skip("No inverse for RewardClipping")
 

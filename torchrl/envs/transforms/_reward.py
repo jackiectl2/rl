@@ -267,8 +267,13 @@ class RewardClipping(Transform):
     """Clips the reward between `clamp_min` and `clamp_max`.
 
     Args:
-        clip_min (scalar): minimum value of the resulting reward.
-        clip_max (scalar): maximum value of the resulting reward.
+        clamp_min (scalar, optional): minimum value of the resulting reward.
+            Defaults to ``None`` (no lower bound).
+        clamp_max (scalar, optional): maximum value of the resulting reward.
+            Defaults to ``None`` (no upper bound).
+
+    .. note:: Providing just one of the arguments ``clamp_min`` or ``clamp_max``
+        is permitted, but at least one must be provided.
 
     """
 
@@ -284,14 +289,14 @@ class RewardClipping(Transform):
         if out_keys is None:
             out_keys = copy(in_keys)
         super().__init__(in_keys=in_keys, out_keys=out_keys)
-        clamp_min_tensor = (
-            clamp_min if isinstance(clamp_min, Tensor) else torch.as_tensor(clamp_min)
-        )
-        clamp_max_tensor = (
-            clamp_max if isinstance(clamp_max, Tensor) else torch.as_tensor(clamp_max)
-        )
-        self.register_buffer("clamp_min", clamp_min_tensor)
-        self.register_buffer("clamp_max", clamp_max_tensor)
+        if clamp_min is None and clamp_max is None:
+            raise TypeError("At least one of clamp_min or clamp_max must be provided.")
+        if clamp_min is not None and not isinstance(clamp_min, Tensor):
+            clamp_min = torch.as_tensor(clamp_min)
+        if clamp_max is not None and not isinstance(clamp_max, Tensor):
+            clamp_max = torch.as_tensor(clamp_max)
+        self.register_buffer("clamp_min", clamp_min)
+        self.register_buffer("clamp_max", clamp_max)
 
     def _apply_transform(self, reward: torch.Tensor) -> torch.Tensor:
         if self.clamp_max is not None and self.clamp_min is not None:
@@ -305,9 +310,15 @@ class RewardClipping(Transform):
     @_apply_to_composite
     def transform_reward_spec(self, reward_spec: TensorSpec) -> TensorSpec:
         if isinstance(reward_spec, Unbounded):
+            # A missing bound leaves that side of the reward unbounded.
+            info = (
+                torch.finfo(reward_spec.dtype)
+                if reward_spec.dtype.is_floating_point
+                else torch.iinfo(reward_spec.dtype)
+            )
             return Bounded(
-                self.clamp_min,
-                self.clamp_max,
+                self.clamp_min if self.clamp_min is not None else info.min,
+                self.clamp_max if self.clamp_max is not None else info.max,
                 shape=reward_spec.shape,
                 device=reward_spec.device,
                 dtype=reward_spec.dtype,
@@ -320,10 +331,11 @@ class RewardClipping(Transform):
             )
 
     def __repr__(self) -> str:
+        clamp_min = None if self.clamp_min is None else f"{float(self.clamp_min):4.4f}"
+        clamp_max = None if self.clamp_max is None else f"{float(self.clamp_max):4.4f}"
         return (
             f"{self.__class__.__name__}("
-            f"clamp_min={float(self.clamp_min):4.4f}, clamp_max"
-            f"={float(self.clamp_max):4.4f}, keys={self.in_keys})"
+            f"clamp_min={clamp_min}, clamp_max={clamp_max}, keys={self.in_keys})"
         )
 
 
